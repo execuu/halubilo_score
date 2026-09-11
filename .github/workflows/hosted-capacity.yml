@@ -29,3 +29,5 @@ jobs:
           name: hosted-capacity-results
           path: output/cloud/*.json
           retention-days: 7
+
+# Dedicated remote rehearsal run; the live event remains in a separate project.
