@@ -1,4 +1,12 @@
-# Verification evidence — 11 September 2026
+# Verification evidence
+
+## Cloud backend update
+
+The Render + Supabase integration adds PostgreSQL, private image storage, automatic fresh-schema startup and portable PostgreSQL-to-SQLite recovery archives. The original 29 workflow cases pass against both local SQLite and PostgreSQL 17. The final Python 3.13 containers passed 34 PostgreSQL cases and 33 SQLite cases (one PostgreSQL-only case skipped). The dependency audit found no known vulnerabilities. Five additional cloud cases cover remote image persistence/recovery, failed uploads, HTTPS proxy handling, refusal of ephemeral Render storage and PostgreSQL schema boundaries. Storage HTTP responses are simulated in local tests; real Supabase account/bucket verification remains pending.
+
+The earlier load timings below describe release 1.0.0 on SQLite only. They do not establish PostgreSQL, Supabase Storage or Render capacity.
+
+## Original local release verification — 11 September 2026
 
 ## Phase status
 
@@ -9,7 +17,7 @@
 | Correctness and deployment hardening | Complete locally | 29 regression cases passed in the Python 3.13 test image with networking disabled |
 | Performance and mobile/report verification | Complete locally | Fifteen-minute workload, Chromium 390x844 checks, rendered three-page A4 report |
 | Backup/recovery implementation and automated drill | Complete locally | Verified restore, image equality, closed source, audited reopening and successful new submission |
-| PythonAnywhere pilot / online approval | Pending account access and actual-host rehearsal | DEPLOYMENT.md lists the public HTTPS and capacity gates |
+| Render + Supabase / online approval | Pending account access and actual-host rehearsal | DEPLOYMENT.md lists the public HTTPS and capacity gates |
 | Physical event-device/router rehearsal | Pending organizer/venue check | Host loopback and LAN interface are verified; an actual remote phone was not available |
 
 ## Automated regression coverage

@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: halubilo
+      POSTGRES_PASSWORD: disposable-test-only
+      POSTGRES_DB: halubilo_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U halubilo -d halubilo_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  tests:
+    build:
+      context: .
+      target: test
+    environment:
+      TEST_POSTGRES_URL: postgresql+psycopg://halubilo:disposable-test-only@postgres/halubilo_test
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [default]
+networks:
+  default:
+    internal: true

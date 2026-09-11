@@ -1,12 +1,24 @@
+import os
 import re
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 import pytest
 from app import create_app, db, User, Team, Activity
 
 @pytest.fixture
 def app(tmp_path):
+    postgres_url = os.environ.get('TEST_POSTGRES_URL')
+    if postgres_url:
+        url = make_url(postgres_url)
+        if url.host not in {'127.0.0.1', 'localhost', 'postgres'} or url.database != 'halubilo_test':
+            raise RuntimeError('PostgreSQL tests require the isolated halubilo_test database on a local test host.')
+        engine = create_engine(postgres_url)
+        with engine.begin() as connection:
+            connection.execute(text('DROP SCHEMA IF EXISTS halubilo CASCADE'))
+        engine.dispose()
     application = create_app({'TESTING': True, 'SECRET_KEY': 'test-secret-' * 8,
-        'SQLALCHEMY_DATABASE_URI': f'sqlite:///{tmp_path / "scoresheet.db"}',
-        'UPLOAD_FOLDER': str(tmp_path / 'uploads'), 'SQLITE_WAL': False, 'HTTPS_ONLY': False})
+        'SQLALCHEMY_DATABASE_URI': postgres_url or f'sqlite:///{tmp_path / "scoresheet.db"}',
+        'STORAGE_BACKEND': 'local', 'TRUST_PROXY': False, 'UPLOAD_FOLDER': str(tmp_path / 'uploads'), 'SQLITE_WAL': False, 'HTTPS_ONLY': False})
     result = application.test_cli_runner().invoke(args=['migrate'])
     assert result.exit_code == 0, result.output
     with application.app_context():

@@ -27,14 +27,16 @@ from flask_login import LoginManager, UserMixin, current_user, login_required, l
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFProtect
 from PIL import Image, ImageOps, UnidentifiedImageError
-from sqlalchemy import event, func, inspect, select, text
+from sqlalchemy import create_engine, event, func, inspect, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.middleware.proxy_fix import ProxyFix
+from storage_backend import StorageError, put_image, get_image, cleanup_image
 
 ROOT = Path(__file__).resolve().parent
 SCHEMA_VERSION = 1
-RELEASE = '1.0.0'
+RELEASE = '1.1.0'
 db = SQLAlchemy()
 csrf = CSRFProtect()
 login_manager = LoginManager()
@@ -226,32 +228,47 @@ def image_upload(upload):
                 image = ImageOps.exif_transpose(source).convert('RGB')
                 image.thumbnail((512, 512))
                 name = secrets.token_hex(16) + '.jpg'
-                target = Path(current_app.config['UPLOAD_FOLDER']) / name
-                image.save(target, 'JPEG', quality=85, optimize=True)
-                g.new_uploads.append(target)
+                encoded = io.BytesIO()
+                image.save(encoded, 'JPEG', quality=85, optimize=True)
+                put_image(name, encoded.getvalue())
+                g.new_uploads.append(name)
                 return name
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError, Image.DecompressionBombWarning):
         abort(400, 'The uploaded file is not a valid supported image.')
 
 
 def make_backup():
-    """Caller holds BEGIN IMMEDIATE: DB and immutable images cannot change."""
+    """Caller holds the event write lock; export a portable SQLite snapshot."""
     filename = db.engine.url.database
     if filename == ':memory:':
         abort(400, 'Backups require a file-backed database.')
     with tempfile.TemporaryDirectory(prefix='halubilo-backup-') as folder:
         snapshot = Path(folder) / 'scoresheet.db'
-        with closing(sqlite3.connect(filename)) as source, closing(sqlite3.connect(snapshot)) as dest:
-            source.backup(dest)
+        if db.engine.dialect.name == 'sqlite':
+            with closing(sqlite3.connect(filename)) as source, closing(sqlite3.connect(snapshot)) as dest:
+                source.backup(dest)
+        else:
+            # Same typed tables and constraints as the LAN release. The event lock
+            # keeps all application writes ordered while the snapshot is copied.
+            with closing(sqlite3.connect(snapshot)) as connection:
+                connection.executescript((ROOT / 'migrations' / '001_initial.sql').read_text())
+            target_engine = create_engine(f'sqlite:///{snapshot}')
+            try:
+                with target_engine.begin() as target:
+                    target.execute(text('DELETE FROM schema_version'))
+                    target.execute(text('DELETE FROM event_state'))
+                    for table in db.metadata.sorted_tables:
+                        rows = [dict(row) for row in db.session.execute(select(table)).mappings()]
+                        if rows:
+                            target.execute(table.insert(), rows)
+            finally:
+                target_engine.dispose()
         image_names = db.session.scalars(select(Team.image_filename).where(Team.image_filename.is_not(None))).all()
         files = {'scoresheet.db': snapshot.read_bytes()}
         for name in image_names:
             if Path(name).name != name:
                 abort(500, 'Invalid stored image path.')
-            image = Path(current_app.config['UPLOAD_FOLDER']) / name
-            if not image.is_file():
-                abort(409, 'A team image is missing. Repair it before creating a backup.')
-            files[f'uploads/{name}'] = image.read_bytes()
+            files[f'uploads/{name}'] = get_image(name)
         manifest = {'release': RELEASE, 'schema': SCHEMA_VERSION, 'created_at': now().isoformat() + 'Z',
                     'sha256': {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}}
         output = io.BytesIO()
@@ -275,6 +292,11 @@ def create_app(config=None):
         SQLALCHEMY_ENGINE_OPTIONS={'connect_args': {'timeout': 10}},
         UPLOAD_FOLDER=os.environ.get('UPLOAD_FOLDER', str(data_dir / 'uploads')),
         EVENT_NAME=os.environ.get('EVENT_NAME', 'Halubilo'),
+        STORAGE_BACKEND=os.environ.get('STORAGE_BACKEND', 'local'),
+        SUPABASE_URL=os.environ.get('SUPABASE_URL', ''),
+        SUPABASE_SERVICE_ROLE_KEY=os.environ.get('SUPABASE_SERVICE_ROLE_KEY', ''),
+        SUPABASE_STORAGE_BUCKET=os.environ.get('SUPABASE_STORAGE_BUCKET', 'team-images'),
+        TRUST_PROXY=os.environ.get('TRUST_PROXY', '0') == '1',
         MAX_CONTENT_LENGTH=4 * 1024 * 1024,
         MAX_FORM_MEMORY_SIZE=128 * 1024,
         SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax',
@@ -289,21 +311,54 @@ def create_app(config=None):
         app.config.update(config)
     if not app.config['SECRET_KEY'] or len(app.config['SECRET_KEY']) < 32:
         raise RuntimeError('Set a unique SECRET_KEY of at least 32 characters (make setup).')
-    if not app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
-        raise RuntimeError('This release supports SQLite only.')
-    Path(app.config['UPLOAD_FOLDER']).mkdir(parents=True, exist_ok=True)
+    uri = app.config['SQLALCHEMY_DATABASE_URI']
+    for prefix in ('postgres://', 'postgresql://'):
+        if uri.startswith(prefix):
+            uri = 'postgresql+psycopg://' + uri[len(prefix):]
+    app.config['SQLALCHEMY_DATABASE_URI'] = uri
+    postgres = uri.startswith('postgresql+psycopg://')
+    if postgres:
+        app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+            'pool_pre_ping': True, 'pool_size': 4, 'max_overflow': 0, 'pool_timeout': 10,
+            'connect_args': {'connect_timeout': 10, 'prepare_threshold': None},
+        }
+    elif not uri.startswith('sqlite:'):
+        raise RuntimeError('Use SQLite or PostgreSQL with the psycopg driver.')
+    if app.config['STORAGE_BACKEND'] not in {'local', 'supabase'}:
+        raise RuntimeError('STORAGE_BACKEND must be local or supabase.')
+    if app.config['STORAGE_BACKEND'] == 'supabase':
+        if not app.config['SUPABASE_URL'].startswith('https://') or not app.config['SUPABASE_SERVICE_ROLE_KEY']:
+            raise RuntimeError('Supabase storage requires an HTTPS SUPABASE_URL and a server-only service role key.')
+        import re
+        if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,62}', app.config['SUPABASE_STORAGE_BUCKET']):
+            raise RuntimeError('Invalid Supabase bucket name.')
+    else:
+        Path(app.config['UPLOAD_FOLDER']).mkdir(parents=True, exist_ok=True)
+    if os.environ.get('RENDER') == 'true' and (not postgres or app.config['STORAGE_BACKEND'] != 'supabase'):
+        raise RuntimeError('Render requires PostgreSQL and Supabase storage; local files are ephemeral.')
+    if app.config['TRUST_PROXY']:
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
     db.init_app(app)
     csrf.init_app(app)
     login_manager.init_app(app)
     with app.app_context():
-        if db.engine.url.database != ':memory:':
+        if not postgres and db.engine.url.database != ':memory:':
             Path(db.engine.url.database).parent.mkdir(parents=True, exist_ok=True)
         @event.listens_for(db.engine, 'connect')
         def sqlite_connection(connection, _):
-            cursor = connection.cursor()
-            cursor.execute('PRAGMA foreign_keys=ON')
-            cursor.execute('PRAGMA busy_timeout=10000')
-            cursor.close()
+            if postgres:
+                connection.autocommit = True
+                with connection.cursor() as cursor:
+                    cursor.execute('SET search_path TO halubilo')
+                    cursor.execute("SET lock_timeout TO '10s'")
+                    cursor.execute("SET statement_timeout TO '25s'")
+                connection.autocommit = False
+            else:
+                cursor = connection.cursor()
+                cursor.execute('PRAGMA foreign_keys=ON')
+                cursor.execute('PRAGMA busy_timeout=10000')
+                cursor.close()
 
     @app.before_request
     def prepare_request():
@@ -312,9 +367,9 @@ def create_app(config=None):
         if app.config['HTTPS_ONLY'] and not request.is_secure and request.path not in {'/healthz', '/livez'}:
             abort(400, 'HTTPS is required.')
         if request.method == 'POST':
-            # SQLite admits one writer. Acquire before authorization/validation reads,
-            # ensuring score limits, roles, event locks and backups share one serial order.
-            db.session.execute(text('BEGIN IMMEDIATE'))
+            # Lock before authorization reads: corrections, role changes, closure
+            # and backup snapshots share one serial order on either database.
+            begin_write()
 
     @app.after_request
     def headers(response):
@@ -333,7 +388,11 @@ def create_app(config=None):
         db.session.rollback()
         if not getattr(g, 'committed', False):
             for filename in getattr(g, 'new_uploads', []):
-                filename.unlink(missing_ok=True)
+                cleanup_image(filename)
+
+    @app.errorhandler(StorageError)
+    def storage_error(error):
+        return render_template('error.html', message=str(error)), 503
 
     @app.errorhandler(IntegrityError)
     def integrity_error(error):
@@ -764,7 +823,12 @@ def create_app(config=None):
 
     @app.get('/uploads/<path:filename>')
     def uploaded_image(filename):
-        return send_from_directory(app.config['UPLOAD_FOLDER'], filename, max_age=86400)
+        if app.config['STORAGE_BACKEND'] == 'local':
+            return send_from_directory(app.config['UPLOAD_FOLDER'], filename, max_age=86400)
+        # Only referenced images are readable; service keys never reach browsers.
+        if not db.session.scalar(select(Team.id).where(Team.image_filename == filename)):
+            abort(404)
+        return send_file(io.BytesIO(get_image(filename)), mimetype='image/jpeg', max_age=86400)
 
     @app.get('/download/sample-teams-csv')
     @admin_required
@@ -784,10 +848,37 @@ def commit():
     g.committed = True
 
 
+def begin_write():
+    if db.engine.dialect.name == 'postgresql':
+        db.session.execute(text('SELECT pg_advisory_xact_lock(721940113)'))
+    else:
+        db.session.execute(text('BEGIN IMMEDIATE'))
+
+
 def register_cli(app):
     @app.cli.command('migrate')
     def migrate():
         """Initialize a fresh event; refuse to modify an unversioned legacy DB."""
+        if db.engine.dialect.name == 'postgresql':
+            # One transaction makes first startup atomic, even with two deploys.
+            with db.engine.begin() as connection:
+                connection.execute(text('SELECT pg_advisory_xact_lock(721940113)'))
+                connection.execute(text('CREATE SCHEMA IF NOT EXISTS halubilo'))
+                connection.execute(text('REVOKE ALL ON SCHEMA halubilo FROM PUBLIC'))
+                tables = inspect(connection).get_table_names(schema='halubilo')
+                if tables:
+                    if 'schema_version' not in tables or connection.scalar(select(SchemaVersion.version)) != SCHEMA_VERSION:
+                        raise click.ClickException('Unrecognized database schema. Use a fresh project or review an explicit migration.')
+                    click.echo('Schema is current; no changes made.')
+                    return
+                db.metadata.create_all(connection)
+                connection.exec_driver_sql((ROOT / 'migrations' / '001_postgres_triggers.sql').read_text())
+                connection.execute(SchemaVersion.__table__.insert().values(version=SCHEMA_VERSION))
+                connection.execute(EventState.__table__.insert().values(id=1, scoring_open=True, revision=1))
+                connection.execute(text('REVOKE ALL ON ALL TABLES IN SCHEMA halubilo FROM PUBLIC'))
+                connection.execute(text('REVOKE ALL ON ALL FUNCTIONS IN SCHEMA halubilo FROM PUBLIC'))
+            click.echo('PostgreSQL schema 1 initialized. Create an administrator with admin-create.')
+            return
         tables = inspect(db.engine).get_table_names()
         if tables:
             if 'schema_version' not in tables or db.session.scalar(select(SchemaVersion.version)) != SCHEMA_VERSION:
@@ -812,7 +903,7 @@ def register_cli(app):
             email = validate_email(email, check_deliverability=False).normalized
         except EmailNotValidError as error:
             raise click.ClickException(str(error))
-        db.session.execute(text('BEGIN IMMEDIATE'))
+        begin_write()
         existing = db.session.scalar(select(User).where(User.username == username.strip()))
         if existing:
             if existing.role != 'admin':
@@ -838,7 +929,7 @@ def register_cli(app):
         """Audited password/role recovery; existing browser sessions are revoked."""
         if len(password) < 12 or not reason.strip() or len(reason) > 1000:
             raise click.ClickException('A reason and a password of at least 12 characters are required.')
-        db.session.execute(text('BEGIN IMMEDIATE'))
+        begin_write()
         user = db.session.scalar(select(User).where(User.username == username))
         if not user:
             raise click.ClickException('Account not found. Use admin-create for a new account.')
@@ -853,7 +944,7 @@ def register_cli(app):
     @click.argument('destination', type=click.Path())
     def backup_cli(destination):
         """Write a private, consistent backup archive outside the web root."""
-        db.session.execute(text('BEGIN IMMEDIATE'))
+        begin_write()
         archive = make_backup()
         target = Path(destination)
         with target.open('xb') as output:

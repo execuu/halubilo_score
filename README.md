@@ -2,6 +2,8 @@
 
 A single-event Flask application for an administrator and activity heads. Each team receives one whole-number score per activity. Standings sum raw points; equal totals share competition ranks (1, 2, 2, 4). A recorded zero is different from an unsubmitted score. This release starts a fresh event and refuses to modify an inherited, unversioned database.
 
+For online hosting, see [Render + Supabase deployment](DEPLOYMENT.md). The cloud backend uses PostgreSQL and private object storage; LAN installations continue using SQLite and local images. Both produce portable LAN recovery archives.
+
 ## Start on this computer
 
 Requirements: Docker Engine with Compose, Python 3 for setup, and an event router for LAN access. Docker builds the Python 3.13/Gunicorn runtime and local CSS; host Python packages are not needed.
@@ -61,7 +63,7 @@ SQLite admits one writer. Mutating HTTP requests acquire the write reservation b
 
 The container runs as UID 10001, with a read-only root filesystem and writable named volumes for `/data` and `/backups`. The database is `/data/scoresheet.db`; images are `/data/uploads`. Native execution defaults to `instance/scoresheet.db` and `instance/uploads`. Paths can be configured using `DATABASE_URL` and `UPLOAD_FOLDER`.
 
-`/livez` checks the process; `/healthz` verifies the schema and event state. Gunicorn logs go to `make logs`. Local LAN mode uses HTTP; production mode requires HTTPS and secure cookies. This release supports SQLite only. Enable WAL only on local disk, never on PythonAnywhere's network filesystem.
+`/livez` checks the process; `/healthz` verifies the schema and event state. Gunicorn logs go to `make logs`. Local LAN mode uses HTTP; production mode requires HTTPS and secure cookies. This release supports SQLite for LAN use and PostgreSQL for cloud use. Enable WAL only on local disk, never on PythonAnywhere's network filesystem.
 
 ## Development and release
 
@@ -80,4 +82,4 @@ make release
 
 Runtime dependencies are pinned in `requirements.txt`; development dependencies are constrained to the same runtime pins. Update `.in` files deliberately and recompile the locks with pip-tools, then repeat tests and the dependency audit. CSS is checked in for native WSGI hosting and rebuilt in Docker. The release archive excludes event data, credentials, `.env`, and test fixtures.
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for the PythonAnywhere pilot, [verification evidence](docs/VERIFICATION.md) for measured gates, and [troubleshooting](docs/TROUBLESHOOTING.md) for common failures. Local success does not certify the online host or venue network.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for Render + Supabase deployment, [verification evidence](docs/VERIFICATION.md) for measured gates, and [troubleshooting](docs/TROUBLESHOOTING.md) for common failures. Local success does not certify the online host or venue network.

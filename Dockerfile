@@ -12,7 +12,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt && useradd --uid 10001 --create-home scoresheet
-COPY app.py wsgi.py ./
+COPY app.py wsgi.py storage_backend.py ./
 COPY migrations ./migrations
 COPY templates ./templates
 COPY static ./static

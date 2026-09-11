@@ -1,4 +1,4 @@
-.PHONY: setup build init start stop restart status logs test backup admin recover assets migrate release
+.PHONY: test-postgres setup build init start stop restart status logs test backup admin recover assets migrate release
 setup:
 	python3 scripts/setup.py
 build:
@@ -31,3 +31,6 @@ assets:
 	npm run build
 release:
 	python3 scripts/release.py
+
+test-postgres:
+	bash scripts/test_postgres.sh

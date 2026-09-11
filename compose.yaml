@@ -11,6 +11,8 @@ services:
     environment:
       DATABASE_URL: sqlite:////data/scoresheet.db
       UPLOAD_FOLDER: /data/uploads
+      STORAGE_BACKEND: local
+      TRUST_PROXY: "0"
     ports:
       - "${PORT:-8080}:8080"
     volumes:

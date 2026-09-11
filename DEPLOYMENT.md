@@ -1,86 +1,60 @@
-# Deployment: PythonAnywhere free pilot
+# Deployment: Render Free + Supabase Free
 
-The chosen online candidate is PythonAnywhere Free, with Docker on the event laptop as a manual recovery option. **Local tests do not establish online readiness.** Public HTTPS verification, the actual-host workload test, and a venue-device rehearsal must pass before event use.
+The cloud target is Render for Flask/Gunicorn, Supabase PostgreSQL for scores and accounts, and a private Supabase Storage bucket for team images. Docker with SQLite remains the manual LAN recovery option. **The cloud integration is prepared; actual account deployment and hosted verification are still pending.**
 
-## Why this candidate, and its limits
+## Account setup
 
-PythonAnywhere supports this small native Flask application with a persistent filesystem, avoiding a database-platform rewrite. The free plan has one web worker, 512 MiB storage, and monthly expiry. New free accounts no longer include MySQL. PythonAnywhere explicitly discourages SQLite for production because its networked filesystem is slower, and SQLite WAL is not supported there. The pilot must use rollback journaling and prove the required event workload.
+Use a fresh Supabase project dedicated to this event. Choose Singapore where available to match the Render Blueprint. Do not reuse a project holding unrelated data without reviewing ownership and limits.
 
-References checked during preparation:
+1. In Supabase, obtain the PostgreSQL **Session pooler** connection string (port 5432) from **Connect**. Use `postgresql+psycopg://.../postgres?sslmode=require`, with the database password URL-encoded. The session pooler supports IPv4. Do not use transaction pooling for this configuration.
+2. Create a **private** Storage bucket named `team-images`, with a 2 MiB file limit and `image/jpeg` allowed. Keep it private and add no anonymous write policies. The server uploads normalized JPEGs and proxies only images referenced by teams.
+3. Obtain the project HTTPS URL and legacy server-only `service_role` key. Never use the anon/publishable key for the server storage credential, or expose the service role key to the browser.
+4. In Render, create a Blueprint from this GitHub repository and the branch containing `render.yaml`. Review that the web service plan is **Free** and no paid database or disk is being created.
+5. Fill the secret fields below. Render generates `SECRET_KEY`. The first startup creates the private database schema and administrator, then starts Gunicorn. Later starts preserve scores and passwords. Automatic deployments are disabled to avoid changing the app during an event.
 
-- [Free account limits](https://help.pythonanywhere.com/pages/FreeAccountsFeatures/)
-- [Available databases and SQLite guidance](https://help.pythonanywhere.com/pages/KindsOfDatabases/)
-- [WAL restriction](https://www.pythonanywhere.com/forums/topic/36213/)
-- [Docker is not supported](https://www.pythonanywhere.com/forums/topic/4019/)
+| Variable | Value |
+| --- | --- |
+| `DATABASE_URL` | Supabase session pooler URI with `sslmode=require` |
+| `SUPABASE_URL` | Project URL, e.g. `https://PROJECT.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only legacy service role key |
+| `SUPABASE_STORAGE_BUCKET` | `team-images` |
+| `INITIAL_ADMIN_USERNAME` | Chosen initial administrator name |
+| `INITIAL_ADMIN_EMAIL` | Administrator email |
+| `INITIAL_ADMIN_PASSWORD` | Unique password of at least 12 characters |
+| `EVENT_NAME` | Event display name |
 
-Render Free is not suitable for this release's local SQLite database and uploads: its filesystem is ephemeral, free services sleep, and a free persistent disk is unavailable. See [Render's documented limitations](https://render.com/docs/free).
+After verifying the first login, remove `INITIAL_ADMIN_PASSWORD` from Render's environment. It is not needed for restarts or later deployments once an administrator exists. Keep `SECRET_KEY` stable across deploys; rotating it logs out users. Use the existing audited CLI recovery command via a trusted local environment connected to the cloud database if recovery is needed.
 
-If the PythonAnywhere pilot fails the workload or reliability checks, do not label it event-ready. Keep the tested LAN deployment and revisit the hosting budget/provider. Do not hide free-tier limits with artificial keep-alive traffic.
+The app creates its tables in the `halubilo` schema, outside Supabase's exposed `public` schema. Do not add `halubilo` to the Data API's exposed schemas. The Flask backend owns authorization. PostgreSQL constraints and triggers enforce duplicate protection, bounds, and immutable audit history; a transaction-scoped event lock orders all application writes and backup snapshots.
 
-## Prepare and upload a release
+## Let the coding agent deploy
 
-On the development computer:
+The repository and GitHub authentication are available locally. Render and Supabase account access must also be made available. A private local file (mode 0600, outside Git or named `.env.cloud`) can hold `RENDER_API_KEY` and `SUPABASE_ACCESS_TOKEN` for account management. Tell the agent only the file path and chosen project/workspace, not the secret values in chat. For an existing Supabase project, deployment also needs its database password/connection URI and server storage credential. Account tokens alone do not reveal an existing database password.
 
-```bash
-make test
-make assets
-make release
-```
+No account tokens belong in `render.yaml`, Git, screenshots, logs, or backup archives. `RENDER_API_KEY` and `SUPABASE_ACCESS_TOKEN` are deployment credentials and are not application environment variables.
 
-Upload `output/releases/halubilo-1.0.0.zip` to the hosting account. Extract into `~/halubilo_scoresheet`. The archive has a manifest and contains compiled CSS; Node and Docker are not required on PythonAnywhere. It intentionally excludes `.env`, databases, account credentials, and uploaded images.
+## Verification before event use
 
-In a PythonAnywhere Bash console:
+1. Verify the public HTTPS login, secure cookies, administrator access and health endpoint.
+2. In an isolated rehearsal project, repeat the 30-team / 20-activity workload with 10 scorekeepers and 50 viewers. The cloud target is p95 below two seconds, no lost or duplicate scores, and independently matching totals/ranks. Local PostgreSQL tests cannot prove free-host capacity.
+3. Upload a team image, submit zero and maximum scores, test forbidden non-admin corrections and an audited admin correction. Recreate the service and confirm records/images persist.
+4. Close scoring, download a backup from Admin, restore into a new LAN volume using [RECOVERY.md](docs/RECOVERY.md), compare standings/images/audit, reopen only the recovery copy with a reason, then submit a new score. Coordinate exactly one authoritative scoring site.
+5. Test from actual event phones and the venue router. Restore the public event to a fresh approved state before real scoring.
 
-```bash
-cd ~/halubilo_scoresheet
-python3.13 -m venv .venv
-. .venv/bin/activate
-pip install --no-cache-dir -r requirements.txt
-python deploy_pythonanywhere.py --prepare
-flask --app app:create_app admin-create
-```
+Cloud backups contain the same portable SQLite snapshot and referenced images as LAN backups. Supabase credentials are not included. The source backend does not need to be available to restore a downloaded archive. Retain downloaded backups outside both providers; a free Supabase project does not include automatic database backups.
 
-The helper creates a private production `.env` only if absent, initializes a fresh versioned database, and prints WSGI setup instructions. It never creates a default password or replaces an existing database. Set `EVENT_NAME` in `.env` before the event. Keep the release source outside publicly mapped directories.
+An upload can leave an unreferenced object if its database transaction fails. Such an object is not served or included in backups. Images use immutable random names; do not delete bucket contents while the app is live or while making a backup.
 
-## Configure the web app
+## Free-tier limitations
 
-Create a manually configured Python 3.13 web app in the Web tab. Use the matching virtualenv and source directory. The WSGI editor should contain the following, with YOUR_USERNAME replaced by the real account:
+Render Free can sleep after inactivity, restart, and has no persistent local disk. The app refuses Render startup with SQLite or local image storage. Supabase Free provides 500 MB database storage and 1 GB file storage, pauses inactive projects, and has no automatic database backups. Quotas and account availability must be checked in the actual dashboards. Never use artificial keep-alive traffic to conceal these limits.
 
-```python
-import sys
-sys.path.insert(0, '/home/YOUR_USERNAME/halubilo_scoresheet')
-from wsgi import application
-```
+References checked during implementation:
 
-Set the virtualenv to `/home/YOUR_USERNAME/halubilo_scoresheet/.venv`.
-Map `/static/` to `/home/YOUR_USERNAME/halubilo_scoresheet/static`. Team images are served through `/uploads/` by Flask; do not map the whole `instance/` directory. In particular, the database must never be downloadable as a static file.
+- [Render free services](https://render.com/docs/free)
+- [Render Blueprint configuration](https://render.com/docs/blueprint-spec)
+- [Supabase connection modes](https://supabase.com/docs/guides/database/connecting-to-postgres)
+- [Supabase Storage access control](https://supabase.com/docs/guides/storage/security/access-control)
+- [Supabase free plan](https://supabase.com/pricing)
 
-Required production settings (the helper writes them):
-
-```dotenv
-APP_ENV=production
-HTTPS_ONLY=1
-SQLITE_WAL=0
-# SECRET_KEY is a generated private value, never the placeholder from older docs.
-# DATABASE_URL and UPLOAD_FOLDER must use persistent absolute paths.
-```
-
-Reload the web app and visit its HTTPS hostname. PythonAnywhere runs WSGI itself; do not launch Gunicorn or Flask's development server in a console. No ProxyFix or trust of arbitrary X-Forwarded headers is enabled.
-
-## Online acceptance gates
-
-- `/healthz` returns HTTP 200 over HTTPS, and the homepage and login load.
-- Admin creation, assigned-head login, zero/max scores, duplicate rejection, correction, audit history and closing/reopening work on the real host.
-- The actual event phones can load pages and submit over the venue network.
-- Records and images survive a Web-tab reload.
-- All page assets load locally, without CDN requests or console errors.
-- A downloaded backup restores in the event laptop's Docker runtime; totals match and a new score can be submitted there.
-- At 30 teams, 20 activities, 10 concurrent heads and 50 viewers, run a 15-minute rehearsal with no lost/duplicate scores, incorrect totals or unexpected server errors. Required online p95 for submissions and leaderboard requests is below two seconds. Pass `--p95-ms 2000` to use the online gate; the script defaults to the stricter one-second local gate.
-
-For capacity testing, use a separate empty rehearsal database and upload directory. Set `REHEARSAL_ONLY=1` and a temporary `REHEARSAL_PASSWORD`, run `python scripts/seed_rehearsal.py`, and point the web app at that database. Run `scripts/load_test.py` from the local computer with its `--url` set to the HTTPS hostname and its credentials in a private env file. It refuses an unexpected/nonempty fixture. Restore the fresh event configuration afterward, reload, create real operator accounts, and remove rehearsal credentials from production configuration.
-
-## Updates, monitoring, and rollback
-
-Before any update, close scoring and download a backup. Preserve the previous release and database paths. Upload the new release, install its pinned dependencies, run the documented migrations, reload and verify health plus a read-only results comparison. If verification fails, restore the prior source and configuration; use a fresh restore directory if the schema changed. Do not delete or overwrite the only database copy.
-
-Check health, free storage, error logs and account expiry before each event. Renew the free web app monthly. During the event, follow the five-minute download schedule and retain worksheets. Free hosting has no event availability guarantee; use the [manual recovery procedure](docs/RECOVERY.md) when needed.
+The earlier native SQLite hosting option is preserved in [PYTHONANYWHERE.md](docs/PYTHONANYWHERE.md).

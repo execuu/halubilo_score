@@ -8,6 +8,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: make test
+      - run: make test-postgres
       - run: docker run --rm halubilo-scoresheet:test pip-audit -r requirements.txt --progress-spinner off
       - uses: actions/setup-node@v4
         with:
