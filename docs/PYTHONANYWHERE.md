@@ -27,7 +27,7 @@ make assets
 make release
 ```
 
-Upload `output/releases/halubilo-1.1.0.zip` to the hosting account. Extract into `~/halubilo_scoresheet`. The archive has a manifest and contains compiled CSS; Node and Docker are not required on PythonAnywhere. It intentionally excludes `.env`, databases, account credentials, and uploaded images.
+Upload `output/releases/halubilo-1.1.1.zip` to the hosting account. Extract into `~/halubilo_scoresheet`. The archive has a manifest and contains compiled CSS; Node and Docker are not required on PythonAnywhere. It intentionally excludes `.env`, databases, account credentials, and uploaded images.
 
 In a PythonAnywhere Bash console:
 

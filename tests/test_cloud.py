@@ -101,3 +101,61 @@ def test_postgres_schema_is_private_and_migration_repeat_safe(app):
         with pytest.raises(Exception, match='append-only'):
             db.session.execute(text('TRUNCATE audit'))
         db.session.rollback()
+
+
+def test_backup_after_reset_preserves_score_identifiers(app, client, tmp_path):
+    from app import Score, EventState
+    login(client)
+    assert post(client, '/scores', {'team_id':'1','activity_id':'1','score':'25'}).status_code == 302
+    with app.app_context():
+        original_id = db.session.scalar(select(Score.id))
+        revision = db.session.get(EventState,1).revision
+    assert post(client, '/admin/scoring', {'revision':str(revision),'scoring_open':'0','reason':'Reset rehearsal'}).status_code == 302
+    assert post(client, '/admin/reset-scores', {'reason':'Fresh scoring run','confirmation':'RESET ALL SCORES'}).status_code == 302
+    archive = post(client, '/admin/backup')
+    assert archive.status_code == 200
+    destination = tmp_path/'empty-recovery'
+    restore(io.BytesIO(archive.data), destination)
+    recovery = create_app({'TESTING':True,'SECRET_KEY':'recovery-secret-'*4,'SQLALCHEMY_DATABASE_URI':f'sqlite:///{destination / "scoresheet.db"}',
+                           'UPLOAD_FOLDER':str(destination/'uploads'),'STORAGE_BACKEND':'local','HTTPS_ONLY':False,'TRUST_PROXY':False})
+    recovered = recovery.test_client();login(recovered)
+    with recovery.app_context():revision=db.session.get(EventState,1).revision
+    assert post(recovered, '/admin/scoring', {'revision':str(revision),'scoring_open':'1','reason':'Continue recovered scoring'}).status_code == 302
+    assert post(recovered, '/scores', {'team_id':'1','activity_id':'1','score':'30'}).status_code == 302
+    with recovery.app_context():assert db.session.scalar(select(Score.id)) > original_id
+
+
+def test_backup_image_download_does_not_block_scoring(app, tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    import app as application
+    from app import Score
+    ready, release = threading.Event(), threading.Event()
+    filename = 'a' * 32 + '.jpg'
+    image = io.BytesIO(); Image.new('RGB',(10,10),'teal').save(image,'JPEG')
+    (tmp_path/'uploads'/filename).write_bytes(image.getvalue())
+    with app.app_context():
+        db.session.get(Team,1).image_filename=filename
+        db.session.commit()
+    original_get=application.get_image
+    def slow_image(name):
+        ready.set()
+        assert release.wait(15), 'Test image request was not released.'
+        return original_get(name)
+    monkeypatch.setattr(application,'get_image',slow_image)
+    admin,head=app.test_client(),app.test_client()
+    login(admin);login(head,'head')
+    with ThreadPoolExecutor(2) as pool:
+        backup=pool.submit(post,admin,'/admin/backup')
+        try:
+            assert ready.wait(5)
+            score=pool.submit(post,head,'/scores',{'team_id':'1','activity_id':'1','score':'50'})
+            assert score.result(timeout=5).status_code==302
+        finally:
+            release.set()
+        archive=backup.result(timeout=10)
+    assert archive.status_code==200
+    destination=tmp_path/'concurrent-backup'
+    counts=restore(io.BytesIO(archive.data),destination)['counts']
+    assert counts['score']==0  # Snapshot precedes the concurrent new score.
+    with app.app_context():assert db.session.query(Score).count()==1

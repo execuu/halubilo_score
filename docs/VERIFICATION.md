@@ -1,5 +1,11 @@
 # Verification evidence
 
+## Release 1.1.1 backup verification
+
+The PostgreSQL-to-SQLite exporter now preserves consumed score IDs even when all current scores have been reset. Its regression was reproduced before the fix and passes afterwards. Backups release the database writer lock before fetching immutable images; a concurrent regression verifies a new score commits while an image download is blocked, while the downloaded snapshot remains consistent.
+
+Final local Python 3.13 container results: **36 PostgreSQL tests passed; 35 SQLite tests passed with one PostgreSQL-only case skipped.** Hosted load testing is tracked separately; no local timing is substituted for it.
+
 ## Cloud backend update
 
 The Render + Supabase integration adds PostgreSQL, private image storage, automatic fresh-schema startup and portable PostgreSQL-to-SQLite recovery archives. The original 29 workflow cases pass against both local SQLite and PostgreSQL 17. The final Python 3.13 containers passed 34 PostgreSQL cases and 33 SQLite cases (one PostgreSQL-only case skipped). The dependency audit found no known vulnerabilities. Five additional cloud cases cover remote image persistence/recovery, failed uploads, HTTPS proxy handling, refusal of ephemeral Render storage and PostgreSQL schema boundaries. Storage HTTP responses are simulated in local tests; real Supabase account/bucket verification remains pending.

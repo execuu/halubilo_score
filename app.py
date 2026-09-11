@@ -36,7 +36,7 @@ from storage_backend import StorageError, put_image, get_image, cleanup_image
 
 ROOT = Path(__file__).resolve().parent
 SCHEMA_VERSION = 1
-RELEASE = '1.1.0'
+RELEASE = '1.1.1'
 db = SQLAlchemy()
 csrf = CSRFProtect()
 login_manager = LoginManager()
@@ -261,15 +261,26 @@ def make_backup():
                         rows = [dict(row) for row in db.session.execute(select(table)).mappings()]
                         if rows:
                             target.execute(table.insert(), rows)
+                    # Preserve IDs already consumed by reset/deleted scores so a
+                    # LAN recovery cannot reuse identifiers referenced by history.
+                    sequence = db.session.execute(text('SELECT last_value, is_called FROM score_id_seq')).one()
+                    high_water = sequence.last_value if sequence.is_called else 0
+                    high_water = max(high_water, target.scalar(select(func.coalesce(func.max(Score.id), 0))))
+                    target.execute(text("DELETE FROM sqlite_sequence WHERE name='score'"))
+                    target.execute(text("INSERT INTO sqlite_sequence(name, seq) VALUES ('score', :value)"), {'value': high_water})
             finally:
                 target_engine.dispose()
         image_names = db.session.scalars(select(Team.image_filename).where(Team.image_filename.is_not(None))).all()
+        snapshot_time = now().isoformat() + 'Z'
         files = {'scoresheet.db': snapshot.read_bytes()}
+        # Referenced images have immutable names and are never deleted by the
+        # app. Release the writer lock before potentially slow object downloads.
+        db.session.rollback()
         for name in image_names:
             if Path(name).name != name:
                 abort(500, 'Invalid stored image path.')
             files[f'uploads/{name}'] = get_image(name)
-        manifest = {'release': RELEASE, 'schema': SCHEMA_VERSION, 'created_at': now().isoformat() + 'Z',
+        manifest = {'release': RELEASE, 'schema': SCHEMA_VERSION, 'created_at': snapshot_time,
                     'sha256': {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}}
         output = io.BytesIO()
         with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
@@ -801,6 +812,7 @@ def create_app(config=None):
     @admin_required
     def backup_download():
         archive = make_backup()
+        begin_write()
         audit('backup.download', 'event:1', 'Consistent database and images exported')
         commit()
         return send_file(archive, mimetype='application/zip', as_attachment=True, download_name=f'halubilo-{now().strftime("%Y%m%dT%H%M%SZ")}.zip')
@@ -950,6 +962,7 @@ def register_cli(app):
         with target.open('xb') as output:
             os.chmod(target, 0o600)
             output.write(archive.getvalue())
+        begin_write()
         audit('backup.create', 'event:1', 'CLI backup', actor='CLI operator')
         db.session.commit()
         click.echo(f'Backup created: {target}')

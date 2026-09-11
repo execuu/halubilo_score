@@ -49,7 +49,7 @@ If the laptop cannot be recovered promptly, record on worksheets until a verifie
 
 ## After connectivity returns
 
-Keep online scoring out of use. Close it when reachable. Download and preserve both databases before reconciliation. Compare score pairs and audit histories for submissions newer than the last common backup. An administrator resolves differences with reasons in the authoritative local system. Export final reports and a final backup. Switch back online only during a coordinated pause after restoring the verified final snapshot into a fresh location and checking the totals.
+Keep online scoring out of use. Close it when reachable. Download and preserve both databases before reconciliation. Compare score pairs and audit histories for submissions newer than the last common backup. An administrator resolves differences with reasons in the authoritative local system. Export final reports and a final backup. The automatic restore command targets LAN SQLite. Continue the event on that recovered LAN copy. Returning its newer data to Supabase requires a separately reviewed migration and total checks; do not resume the stale cloud database.
 
 ## Back up the recovery container
 

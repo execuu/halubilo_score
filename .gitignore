@@ -157,3 +157,6 @@ output/
 *.zip
 .env.*
 !.env.example
+
+# Supabase CLI connection metadata
+supabase/.temp/
