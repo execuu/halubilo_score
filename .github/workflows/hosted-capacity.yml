@@ -1,0 +1,31 @@
+name: Hosted rehearsal capacity
+on:
+  push:
+    branches: [verify/hosted-capacity]
+    paths: [.github/workflows/hosted-capacity.yml, scripts/load_test.py]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: hosted-capacity
+  cancel-in-progress: false
+jobs:
+  capacity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install requests==2.34.2 python-dotenv==1.2.3
+      - name: Run isolated hosted rehearsal
+        env:
+          REHEARSAL_PASSWORD: ${{ secrets.HALUBILO_REHEARSAL_PASSWORD }}
+        run: python scripts/load_test.py --url https://halubilo-scoresheet.onrender.com --seconds 900 --p95-ms 2000 --output output/cloud/load-test.json --confirm-rehearsal
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hosted-capacity-results
+          path: output/cloud/*.json
+          retention-days: 7

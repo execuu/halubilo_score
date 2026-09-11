@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run against a seeded disposable rehearsal host, NEVER a real event."""
 import argparse
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 import json
 import math
@@ -86,6 +86,19 @@ def viewer(index):
 
 with ThreadPoolExecutor(max_workers=60) as pool:
     jobs=[pool.submit(scorekeeper,i) for i in range(10)] + [pool.submit(viewer,i) for i in range(50)]
+    pending=set(jobs)
+    while pending:
+        _, pending=wait(pending,timeout=30)
+        with lock:
+            progress={'elapsed_seconds':round(time.monotonic()-start,1),
+                      'requests':{kind:len(values) for kind,values in metrics.items()},'errors':len(errors)}
+            checkpoint={'started_at':started,'progress':progress,'metrics':metrics,'errors':errors}
+            checkpoint_path=Path(args.output).with_suffix('.progress.json')
+            checkpoint_path.parent.mkdir(parents=True,exist_ok=True)
+            temporary=checkpoint_path.with_suffix('.tmp')
+            temporary.write_text(json.dumps(checkpoint))
+            temporary.replace(checkpoint_path)
+        print(json.dumps(progress),flush=True)
     for job in jobs: job.result()
 time.sleep(max(0, end-time.monotonic()))
 elapsed=time.monotonic()-start
