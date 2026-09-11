@@ -41,7 +41,7 @@ No account tokens belong in `render.yaml`, Git, screenshots, logs, or backup arc
 4. Close scoring, download a backup from Admin, restore into a new LAN volume using [RECOVERY.md](docs/RECOVERY.md), compare standings/images/audit, reopen only the recovery copy with a reason, then submit a new score. Coordinate exactly one authoritative scoring site.
 5. Test from actual event phones and the venue router. Restore the public event to a fresh approved state before real scoring.
 
-Cloud backups contain the same portable SQLite snapshot and referenced images as LAN backups. Supabase credentials are not included. The source backend does not need to be available to restore a downloaded archive. Retain downloaded backups outside both providers; a free Supabase project does not include automatic database backups.
+Cloud backups contain the same portable SQLite snapshot and referenced images as LAN backups. They preserve consumed score identifiers even after resets. The write lock covers the database snapshot; it is released before downloading immutable images, so slow object storage does not stall scoring. Supabase credentials are not included. The source backend does not need to be available to restore a downloaded archive. Retain downloaded backups outside both providers; a free Supabase project does not include automatic database backups.
 
 An upload can leave an unreferenced object if its database transaction fails. Such an object is not served or included in backups. Images use immutable random names; do not delete bucket contents while the app is live or while making a backup.
 

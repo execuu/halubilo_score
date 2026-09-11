@@ -3,6 +3,7 @@
 from pathlib import Path
 import hashlib
 import json
+import re
 import zipfile
 root=Path(__file__).resolve().parents[1]
 files=['Dockerfile','package.json','package-lock.json','tailwind.config.js','storage_backend.py','render.yaml','app.py','wsgi.py','requirements.txt','README.md','DEPLOYMENT.md','deploy_pythonanywhere.py','migrate_db.py']
@@ -12,7 +13,8 @@ files.extend(['static/app.css','static/app.js','static/src/app.css'])
 for name in files:
     if not (root/name).is_file(): raise SystemExit(f'Missing release file: {name}')
 out=root/'output/releases'; out.mkdir(parents=True,exist_ok=True)
-target=out/'halubilo-1.1.0.zip'
+version=re.search(r"^RELEASE = '([^']+)'", (root/'app.py').read_text(), re.MULTILINE).group(1)
+target=out/f'halubilo-{version}.zip'
 manifest={name:hashlib.sha256((root/name).read_bytes()).hexdigest() for name in sorted(files)}
 with zipfile.ZipFile(target,'w',zipfile.ZIP_DEFLATED) as archive:
     for name in sorted(files): archive.write(root/name,name)

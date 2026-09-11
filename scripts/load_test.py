@@ -72,6 +72,12 @@ def scorekeeper(index):
         activity=index+1+(10 if step>=30 else 0)
         team=(step%30)+1
         session=heads[activity]
+        if step == 30:
+            # These accounts were authenticated before the measured window and
+            # their TCP pools have been idle for 7.5 minutes. Retain cookies but
+            # reconnect, as an activity head returning in a browser would do.
+            # No failed request or submitted score is retried or hidden.
+            session.close()
         response=measured(session,'score_form','GET','/scores',200)
         if response is None or response.status_code!=200: continue
         measured(session,'score','POST','/scores',302,data={'csrf_token':token(response.text),'team_id':team,'activity_id':activity,'score':(team*7+activity*3)%101,'notes':'15-minute disposable rehearsal'})
