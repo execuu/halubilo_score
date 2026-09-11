@@ -6,8 +6,8 @@ import json
 import re
 import zipfile
 root=Path(__file__).resolve().parents[1]
-files=['Dockerfile','package.json','package-lock.json','tailwind.config.js','storage_backend.py','render.yaml','app.py','wsgi.py','requirements.txt','README.md','DEPLOYMENT.md','deploy_pythonanywhere.py','migrate_db.py']
-for folder in ['templates','migrations','scripts','docs']:
+files=['Makefile','compose.yaml','compose.rehearsal.yaml','compose.tests.yaml','.dockerignore','.gitignore','.env.example','requirements-dev.txt','requirements.in','requirements-dev.in','pytest.ini','QUICK_START.md','Dockerfile','package.json','package-lock.json','tailwind.config.js','storage_backend.py','render.yaml','app.py','wsgi.py','requirements.txt','README.md','DEPLOYMENT.md','deploy_pythonanywhere.py','migrate_db.py']
+for folder in ['templates','migrations','scripts','docs','tests']:
     files.extend(str(path.relative_to(root)) for path in (root/folder).rglob('*') if path.is_file() and '__pycache__' not in path.parts and path.suffix in {'.html','.sql','.py','.sh','.md'})
 files.extend(['static/app.css','static/app.js','static/src/app.css'])
 for name in files:

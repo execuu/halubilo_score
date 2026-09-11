@@ -2,6 +2,8 @@
 
 A single-event Flask application for an administrator and activity heads. Each team receives one whole-number score per activity. Standings sum raw points; equal totals share competition ranks (1, 2, 2, 4). A recorded zero is different from an unsubmitted score. This release starts a fresh event and refuses to modify an inherited, unversioned database.
 
+The deployed event is at **https://halubilo-scoresheet.onrender.com**. See the [hosted operator handoff](docs/HOSTED_DEPLOYMENT.md) for administrator access, backups and deployment details.
+
 For online hosting, see [Render + Supabase deployment](DEPLOYMENT.md). The cloud backend uses PostgreSQL and private object storage; LAN installations continue using SQLite and local images. Both produce portable LAN recovery archives.
 
 ## Start on this computer

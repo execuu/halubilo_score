@@ -8,9 +8,35 @@ Final local Python 3.13 container results: **36 PostgreSQL tests passed; 35 SQLi
 
 ## Cloud backend update
 
-The Render + Supabase integration adds PostgreSQL, private image storage, automatic fresh-schema startup and portable PostgreSQL-to-SQLite recovery archives. The original 29 workflow cases pass against both local SQLite and PostgreSQL 17. The final Python 3.13 containers passed 34 PostgreSQL cases and 33 SQLite cases (one PostgreSQL-only case skipped). The dependency audit found no known vulnerabilities. Five additional cloud cases cover remote image persistence/recovery, failed uploads, HTTPS proxy handling, refusal of ephemeral Render storage and PostgreSQL schema boundaries. Storage HTTP responses are simulated in local tests; real Supabase account/bucket verification remains pending.
+The Render + Supabase integration adds PostgreSQL, private image storage, automatic fresh-schema startup and portable PostgreSQL-to-SQLite recovery archives. The original 29 workflow cases pass against both local SQLite and PostgreSQL 17. The initial cloud integration passed 34 PostgreSQL cases and 33 SQLite cases (one PostgreSQL-only case skipped); release 1.1.1 adds the two backup regressions reported above. The dependency audit found no known vulnerabilities. Five additional cloud cases cover remote image persistence/recovery, failed uploads, HTTPS proxy handling, refusal of ephemeral Render storage and PostgreSQL schema boundaries. Storage HTTP responses are simulated in local tests. Actual Supabase private upload/read/delete, anonymous denial, private database schema boundaries and SSL enforcement were subsequently verified in the dedicated hosted projects.
 
 The earlier load timings below describe release 1.0.0 on SQLite only. They do not establish PostgreSQL, Supabase Storage or Render capacity.
+
+## Hosted capacity — 11 September 2026
+
+Release 1.1.1 ran on Render Free in Singapore with one Gunicorn worker and four threads, using Supabase PostgreSQL and private Storage in Singapore. A GitHub-hosted runner exercised the actual public HTTPS service against an isolated rehearsal project. Scheduled window: 900 seconds; measured window: 900.07 seconds, starting 04:24:10 UTC.
+
+| Request | Count | p95 | Maximum |
+| --- | ---: | ---: | ---: |
+| Score submission | 600 | 1492.34 ms | 2132.79 ms |
+| Leaderboard | 4500 | 833.69 ms | 1742.05 ms |
+| Score-entry page | 600 | 1244.01 ms | 1657.68 ms |
+
+Thirty teams, twenty activities, ten scorekeeper threads and fifty viewers polling every ten seconds produced **600 accepted scores, zero request errors and independently matching totals and competition ranks**. Both required p95 measurements passed the two-second hosted gate. This measures the stated workload; free-host performance and venue connectivity can vary.
+
+Evidence: [successful capacity workflow](https://github.com/execuu/halubilo_score/actions/runs/34562020074), local `output/cloud/final-capacity/load-test.json` and its per-request checkpoint. GitHub artifacts expire; the local copies are retained.
+
+Earlier attempts are retained as failed evidence. One local runner was interrupted; another encountered local DNS failures. A first complete hosted run accepted 595 scores and failed five score-page GETs when switching to accounts whose Python HTTP connection pools had been idle for 7.5 minutes. Before the successful run, the harness was changed to close those idle pools while retaining authenticated cookies before first use. It does not retry failed requests or score submissions. No failed attempt is counted as a passing gate.
+
+An upgrade from 1.1.0 to 1.1.1 preserved all 595 then-existing rehearsal scores, standings, account access and image bytes (`output/cloud/upgrade-persistence.json`). Hosted Chromium at 390×844 verified scoring controls, navigation, images and draft preservation across a leaderboard refresh, with no console errors or horizontal page overflow.
+
+## Hosted backup and LAN recovery
+
+The hosted rehearsal verified that an activity head receives 403 when attempting a correction, an administrator can correct with a reason, a stale version receives 409, and closing scoring blocks further corrections. A downloaded backup contained 30 teams, 20 activities, 600 scores, 3,164 audit records, 21 accounts and the referenced image.
+
+Both a native SQLite restore and a new Docker volume passed integrity checks and reproduced the source standings and image bytes. The corrected score and its audit reason survived. The Docker copy was reopened with a reason and accepted score 601 while the closed cloud source remained unchanged. Restore-to-successful-continuation took **11.38 seconds** in the automated Docker drill. Loopback and the laptop's then-current LAN interface (`10.36.125.11:8083`) returned HTTP 200. This does not measure participant coordination or a physical phone on venue Wi-Fi.
+
+Evidence: `output/cloud/recovery-result.json`, `output/cloud/docker-recovery-result.json`, and private `output/cloud/hosted-rehearsal-backup.zip`. The recovery container was stopped after the drill; its separate volume `halubilo_cloud_recovery_20260911` was retained. No original local event volume was overwritten.
 
 ## Original local release verification — 11 September 2026
 
@@ -23,7 +49,7 @@ The earlier load timings below describe release 1.0.0 on SQLite only. They do no
 | Correctness and deployment hardening | Complete locally | 29 regression cases passed in the Python 3.13 test image with networking disabled |
 | Performance and mobile/report verification | Complete locally | Fifteen-minute workload, Chromium 390x844 checks, rendered three-page A4 report |
 | Backup/recovery implementation and automated drill | Complete locally | Verified restore, image equality, closed source, audited reopening and successful new submission |
-| Render + Supabase / online approval | Pending account access and actual-host rehearsal | DEPLOYMENT.md lists the public HTTPS and capacity gates |
+| Render + Supabase deployment and hosted gates | Complete | Public HTTPS, clean admin login, private storage, persistence, 900-second capacity test and cloud-to-Docker recovery passed |
 | Physical event-device/router rehearsal | Pending organizer/venue check | Host loopback and LAN interface are verified; an actual remote phone was not available |
 
 ## Automated regression coverage
@@ -70,6 +96,12 @@ The fresh event contains an administrator and no rehearsal teams, activities or 
 
 The first build encountered a full root filesystem. Unused build cache was pruned, the build succeeded, and later disk checks showed approximately 20 GiB available. No organizer database or running unrelated application was removed.
 
+## Fresh event deployment
+
+Render was switched from the disposable rehearsal project to dedicated Supabase project `halubilo-scoresheet` (`cmvpdamcnnzodvpumxsv`). Deployment `dep-dahocibm8hqs73cmu480` became live at 04:41:32 UTC on 11 September 2026, using tested application commit `f8f06286643be73842b9f41014a82a91a1403a38`. The real HTTPS administrator login, empty standings, reports, audit and backup download passed. The real administrator dashboard was also verified in mobile Chromium.
+
+There is one administrator and no teams, activities or scores. Initial admin credentials are in private local `instance/cloud-admin-credentials.txt`; the initial backup is `backups/cloud-initial-event.zip`. Render remains on Free with automatic deployments disabled and no initial admin password in its runtime configuration. Evidence: `output/cloud/production-result.json` and `output/playwright/cloud-production-admin.png`.
+
 ## Remaining release gates
 
-The source release manifest was verified and the PythonAnywhere preparation helper passed both fresh initialization and repeat initialization under Python 3.13 with networking disabled. The archive contains no event database or secrets. Evidence: `output/releases/native-check.json`. A PythonAnywhere username/account session has not been provided, so no public site has been provisioned or declared ready. The actual-host HTTPS, persistence, workload and venue-device tests remain required before event use. Free-host limits remain material; refer to DEPLOYMENT.md.
+The source release manifest was verified and the PythonAnywhere preparation helper passed both fresh initialization and repeat initialization under Python 3.13 with networking disabled. The archive contains no event database or secrets. Evidence: `output/releases/native-check.json`. PythonAnywhere was not used for the final deployment. Render + Supabase passed the hosted HTTPS, persistence, workload and recovery checks above. The remaining organizer gate is testing actual scorekeeper phones and the venue router, including coordinated recovery. Free-host limits remain material; refer to DEPLOYMENT.md.

@@ -2,7 +2,7 @@
 
 ## Before the event
 
-- Keep this tested release and its Docker image on the event laptop. Start it once before event day so internet is not required to download images or dependencies.
+- Keep release 1.1.1 and its Docker image on the event laptop. The hosted deployment handoff includes the tested image `halubilo-scoresheet:1.1.1`. To recreate it from this release, run `docker build -t halubilo-scoresheet:1.1.1 .` while online. Start it once before event day so internet is not required to download images or dependencies.
 - Bring a router that permits communication between devices and keep the laptop on power. Record the LAN URL from `make status` and test it on an actual scorekeeper's phone.
 - Keep the local `.env` private. It should have its own secret and `APP_ENV=lan`, `HTTPS_ONLY=0`.
 - Download the latest online backup to `backups/` every five minutes during scoring and after each activity. Verify the download completed. Keep backup copies on a separate device as well.
@@ -19,7 +19,7 @@ docker volume create halubilo_recovery_event
 # The pipe passes the private ZIP without exposing host-directory permissions.
 docker run --rm -i --network none \
   -v halubilo_recovery_event:/data \
-  halubilo-scoresheet:local \
+  halubilo-scoresheet:1.1.1 \
   python scripts/restore.py - /data < backups/SELECTED-BACKUP.zip
 ```
 
@@ -37,7 +37,7 @@ docker run -d --name halubilo-recovery \
   -e DATABASE_URL=sqlite:////data/scoresheet.db \
   -e UPLOAD_FOLDER=/data/uploads \
   -p 8083:8080 -v halubilo_recovery_event:/data \
-  halubilo-scoresheet:local
+  halubilo-scoresheet:1.1.1
 curl --fail http://localhost:8083/healthz
 ```
 

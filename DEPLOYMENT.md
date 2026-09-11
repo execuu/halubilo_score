@@ -1,6 +1,6 @@
 # Deployment: Render Free + Supabase Free
 
-The cloud target is Render for Flask/Gunicorn, Supabase PostgreSQL for scores and accounts, and a private Supabase Storage bucket for team images. Docker with SQLite remains the manual LAN recovery option. **The cloud integration is prepared; actual account deployment and hosted verification are still pending.**
+The cloud target is Render for Flask/Gunicorn, Supabase PostgreSQL for scores and accounts, and a private Supabase Storage bucket for team images. Docker with SQLite remains the manual LAN recovery option. **Deployed and verified on 11 September 2026:** [open the live scoresheet](https://halubilo-scoresheet.onrender.com). See the [actual deployment and operator handoff](docs/HOSTED_DEPLOYMENT.md) for account access, resource identifiers, measured checks and recovery. The setup below is for creating another deployment.
 
 ## Account setup
 
