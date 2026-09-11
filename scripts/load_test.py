@@ -35,6 +35,7 @@ def token(html):
 
 def authenticated(username):
     session=requests.Session()
+    session.headers['Referer']=base+'/login'
     response=session.get(base+'/login',timeout=15)
     response.raise_for_status()
     response=session.post(base+'/login', data={'username':username,'password':password,'csrf_token':token(response.text)}, allow_redirects=False, timeout=15)
