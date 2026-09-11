@@ -1,0 +1,16 @@
+name: Verify scoresheet
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make test
+      - run: docker run --rm halubilo-scoresheet:test pip-audit -r requirements.txt --progress-spinner off
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci && npm run build && git diff --exit-code -- static/app.css

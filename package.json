@@ -1,0 +1,1 @@
+{"name":"halubilo-scoresheet-assets","private":true,"scripts":{"build":"tailwindcss -i static/src/app.css -o static/app.css --minify"},"devDependencies":{"tailwindcss":"3.4.19"}}
